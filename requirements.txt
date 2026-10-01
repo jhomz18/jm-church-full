@@ -1,6 +1,7 @@
 streamlit
 librosa
 yt-dlp
-numpy
 fpdf2
+youtube-transcript-api
+numpy
 soundfile
