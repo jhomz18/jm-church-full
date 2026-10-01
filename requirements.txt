@@ -1,6 +1,6 @@
-﻿fastapi
-uvicorn
-yt-dlp
+streamlit
 librosa
+yt-dlp
 numpy
+fpdf2
 soundfile
