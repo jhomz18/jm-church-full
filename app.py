@@ -1,88 +1,69 @@
-import streamlit as st
-import librosa
-import yt_dlp
-import os
-import tempfile
-import numpy as np
-
-# --- CONFIG ---
-MAX_DURATION = 600 # 10 MINS NA SIR!
-st.set_page_config(page_title="JM Church - Full Song", page_icon="🎸", layout="centered")
-
-st.title("🎸 JM CHURCH - FULL SONG ANALYSIS")
-st.caption(f"Full analysis up to {MAX_DURATION//60} mins | 512MB Optimized")
-st.divider()
-
-url = st.text_input("Paste YouTube worship song link here:", placeholder="https://www.youtube.com/watch?v=...")
-
-def get_audio_path(youtube_url):
-    tmpdir = tempfile.mkdtemp()
-    # M4A lang para tipid sa RAM at mabilis
-    ydl_opts = {
-        'format': 'bestaudio[ext=m4a]/bestaudio',
-        'outtmpl': os.path.join(tmpdir, '%(id)s.%(ext)s'),
-        'quiet': True,
-        'noplaylist': True,
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(youtube_url, download=True)
-        filepath = ydl.prepare_filename(info)
-        return filepath, info.get('title', 'Worship Song')
-
-if st.button("🔍 Analyze Full Song", type="primary"):
-    if not url:
-        st.warning("Paste ka muna ng YouTube link sir!")
+import streamlit as st, librosa, yt_dlp, os, tempfile, numpy as np
+from fpdf import FPDF
+MAX_DURATION=600
+KEYS=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
+def transpose_chord(chord, semi):
+    root=chord.replace('m','').replace('7','').replace('sus4','').replace('sus','').replace('maj','')[:2].strip()
+    if root not in KEYS: root=root[0]
+    if root not in KEYS: return chord
+    new_root=KEYS[(KEYS.index(root)+semi)%12]
+    return chord.replace(root,new_root,1)
+st.set_page_config(page_title="JM Church Full",page_icon="🎸",layout="centered")
+st.title("🎸 JM CHURCH - COMPLETE")
+st.caption("10 Mins | Transpose | PDF | Lyrics + Chords | 512MB Ready")
+url=st.text_input("YouTube Link:")
+semi=st.slider("Transpose semitones",-6,6,0)
+lyrics_input=st.text_area("Paste Lyrics (optional):",height=120,placeholder="Pupurihin Ka sa awit...")
+def get_audio(youtube_url):
+    tmpdir=tempfile.mkdtemp()
+    opts={'format':'bestaudio[ext=m4a]/bestaudio','outtmpl':os.path.join(tmpdir,'%(id)s.%(ext)s'),'quiet':True,'noplaylist':True}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info=ydl.extract_info(youtube_url,download=True)
+        return ydl.prepare_filename(info),info.get('title','Worship Song')
+if st.button("🔍 ANALYZE COMPLETE",type="primary",use_container_width=True):
+    if not url: st.warning("Paste link muna sir!")
     else:
         try:
-            with st.status("Downloading & Analyzing... baka 30-40 sec", expanded=True) as status:
-                st.write("⬇️ Downloading audio...")
-                audio_path, title = get_audio_path(url)
-
-                st.write(f"🎵 Loading up to {MAX_DURATION//60} mins (sr=22k mono for 512MB)...")
-                # TIPID SA RAM: 22k + mono + max 10 mins
-                y, sr = librosa.load(audio_path, sr=22050, mono=True, duration=MAX_DURATION)
-
-                duration_sec = librosa.get_duration(y=y, sr=sr)
-
-                st.write("🥁 Analyzing tempo, key, energy...")
-                tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-                chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
-                # Simple key guess from chroma
-                key_idx = np.argmax(np.sum(chroma, axis=1))
-                keys = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-                est_key = keys[key_idx]
-
-                # Energy / sections for Verse-Chorus guess
-                rms = librosa.feature.rms(y=y)[0]
-
-                status.update(label=f"Done! {title}", state="complete")
-
-            st.success(f"✅ **{title}**")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Duration Analyzed", f"{duration_sec/60:.1f} min")
-            c2.metric("Tempo", f"{float(tempo):.0f} BPM")
-            c3.metric("Est. Key", est_key)
-
-            st.subheader("📊 Full Song Structure (Auto)")
-            st.write(f"Total length na na-analyze: **{duration_sec:.1f} sec**. Kung lagpas 10 mins yung original, hanggang 10 mins lang kinuha natin para kumasya sa Free 512MB RAM.")
-
-            # Simple timeline
-            sections = int(duration_sec // 30) # every 30 sec isang section
-            for i in range(sections):
-                start = i*30
-                energy = np.mean(rms[int(i*len(rms)/sections):int((i+1)*len(rms)/sections)])
-                label = "Chorus (High Energy)" if energy > np.mean(rms) else "Verse / Bridge"
-                st.progress(min(1.0, energy*3), text=f"{start//60}:{start%60:02d} - {label}")
-
-            st.divider()
-            st.info("💡 TIP: Naka 10 mins na to sir! Kaya na mga live worship. Pag 2 users sabay, baka mag-restart si Render kasi sagad 512MB - okay lang, libre naman.")
-
-            # Cleanup
-            try:
-                os.remove(audio_path)
-            except:
-                pass
-
-        except Exception as e:
-            st.error(f"Error sir: {e}")
-            st.write("Try mo ibang YouTube link o check mo kung private yung video.")
+            with st.status("Analyzing 10 mins...",expanded=True) as s:
+                s.write("⬇️ Downloading...")
+                path,title=get_audio(url)
+                s.write("🎵 Detecting...")
+                y,sr=librosa.load(path,sr=22050,mono=True,duration=MAX_DURATION)
+                dur=librosa.get_duration(y=y,sr=sr)
+                tempo,_=librosa.beat.beat_track(y=y,sr=sr)
+                chroma=librosa.feature.chroma_cqt(y=y,sr=sr)
+                orig_key=KEYS[int(np.argmax(np.sum(chroma,axis=1)))]
+                new_key=KEYS[(KEYS.index(orig_key)+semi)%12]
+                chords=[]
+                for i in range(0,chroma.shape[1],86):
+                    c=KEYS[int(np.argmax(np.mean(chroma[:,i:i+86],axis=1)))]
+                    chords.append(transpose_chord(c,semi))
+                s.update(label=f"Done: {title}",state="complete")
+            st.success(f"{title} | {orig_key} -> {new_key} | {float(tempo):.0f} BPM | {dur/60:.1f}m")
+            st.subheader(f"Lyrics + Chords - Key {new_key}")
+            report=[]
+            if lyrics_input:
+                lines=lyrics_input.split('\n'); idx=0
+                for line in lines:
+                    if line.strip()=="": st.write(""); report.append(("", "")); continue
+                    c1=chords[idx%len(chords)] if chords else new_key
+                    c2=chords[(idx+1)%len(chords)] if len(chords)>1 else new_key
+                    idx+=2
+                    st.markdown(f"<pre style='color:#FF6B35;font-weight:bold;margin:0'>{c1} {c2}</pre>",unsafe_allow_html=True)
+                    st.markdown(f"<pre style='margin-top:0'>{line}</pre>",unsafe_allow_html=True)
+                    report.append((f"{c1} {c2}",line))
+            else:
+                st.code(" - ".join(chords[:30])); report=[("Chords"," - ".join(chords[:30]))]
+            if st.button("📄 Generate PDF"):
+                pdf=FPDF(); pdf.add_page(); pdf.set_font("Arial","B",16)
+                pdf.cell(0,10,f"JM CHURCH - {title}",ln=True,align='C')
+                pdf.set_font("Arial","",11); pdf.cell(0,8,f"Key {orig_key}->{new_key} ({semi:+d}) BPM {float(tempo):.0f} {dur/60:.1f}m",ln=True); pdf.ln(5)
+                pdf.set_font("Courier","",11)
+                for ch, lyr in report:
+                    if ch=="": pdf.ln(4); continue
+                    pdf.cell(0,6,ch,ln=True); pdf.cell(0,6,lyr,ln=True); pdf.ln(2)
+                out=os.path.join(tempfile.gettempdir(),"jm.pdf"); pdf.output(out)
+                with open(out,"rb") as f: st.download_button("⬇️ DOWNLOAD PDF",f,file_name=f"{title}_{new_key}.pdf",use_container_width=True)
+            try: os.remove(path)
+            except: pass
+        except Exception as e: st.error(f"Error: {e}")
