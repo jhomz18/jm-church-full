@@ -8,8 +8,8 @@ def transpose_chord(chord, semi):
     if root not in KEYS: return chord
     new_root=KEYS[(KEYS.index(root)+semi)%12]
     return chord.replace(root,new_root,1)
-st.set_page_config(page_title="JM Church Full",page_icon="🎸",layout="centered")
-st.title("🎸 JM CHURCH - COMPLETE")
+st.set_page_config(page_title="JM Church Chord Finder",page_icon="🎸",layout="centered")
+st.title("🎸 JM CHURCH CHORD FINDER")
 st.caption("10 Mins | Transpose | PDF | Lyrics + Chords | 512MB Ready")
 url=st.text_input("YouTube Link:")
 semi=st.slider("Transpose semitones",-6,6,0)
@@ -56,7 +56,7 @@ if st.button("🔍 ANALYZE COMPLETE",type="primary",use_container_width=True):
                 st.code(" - ".join(chords[:30])); report=[("Chords"," - ".join(chords[:30]))]
             if st.button("📄 Generate PDF"):
                 pdf=FPDF(); pdf.add_page(); pdf.set_font("Arial","B",16)
-                pdf.cell(0,10,f"JM CHURCH - {title}",ln=True,align='C')
+                pdf.cell(0,10,f"JM CHURCH CHORD FINDER - {title}",ln=True,align='C')
                 pdf.set_font("Arial","",11); pdf.cell(0,8,f"Key {orig_key}->{new_key} ({semi:+d}) BPM {float(tempo):.0f} {dur/60:.1f}m",ln=True); pdf.ln(5)
                 pdf.set_font("Courier","",11)
                 for ch, lyr in report:
