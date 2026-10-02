@@ -1,5 +1,5 @@
 streamlit
-librosa==0.10.0
+librosa==0.11.0
 soundfile
 numpy
 fpdf
