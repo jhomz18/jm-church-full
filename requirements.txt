@@ -1,9 +1,11 @@
 streamlit
-librosa==0.11.0
 yt-dlp==2025.11.12
-fpdf2
-numpy==1.26.4
-setuptools
+librosa==0.11.0
 soundfile
-youtube-transcript-api
 audioread
+setuptools
+youtube-transcript-api
+openai-whisper
+torch --index-url https://download.pytorch.org/whl/cpu
+fpdf2
+numpy
