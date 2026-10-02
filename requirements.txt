@@ -1,7 +1,7 @@
 streamlit
-librosa
-yt-dlp
+librosa==0.10.1
+yt-dlp==2024.8.6
 fpdf2
-youtube-transcript-api
-numpy
+numpy==1.26.4
 soundfile
+youtube-transcript-api
