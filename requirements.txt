@@ -2,5 +2,4 @@ streamlit
 librosa
 numpy
 soundfile
-chord-extractor
-torch
+fpdf
