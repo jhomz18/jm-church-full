@@ -1,7 +1,9 @@
 streamlit
-librosa==0.10.1
-yt-dlp==2024.8.6
+librosa==0.11.0
+yt-dlp==2025.11.12
 fpdf2
 numpy==1.26.4
+setuptools
 soundfile
 youtube-transcript-api
+audioread
