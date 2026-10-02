@@ -1,157 +1,59 @@
-import streamlit as st
-import librosa
-import numpy as np
-import os
+import streamlit as st, librosa, numpy as np
 from fpdf import FPDF
 
-st.set_page_config(page_title="JM CHORD FINDER - MP3 ONLY", page_icon="🎸", layout="centered")
 st.title("🎸 JM CHORD FINDER")
-st.caption("MP3 / MP4 / WAV / M4A - Kahit anong kanta | Key + Chords + Transpose + PDF")
+NOTES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
+TEMPLATE = {
+ '': [1,0,0,0,1,0,0,1,0,0,0,0],
+ 'm': [1,0,0,1,0,0,0,0],
+ '7': [1,0,0,0,1,0,0,1,0,0,1,0],
+ 'maj7': [1,0,0,0,1,0,0,1,0,0,0,1]
+}
+def get_chord(v):
+    v = v/np.linalg.norm(v)
+    best, sc = "C", -1
+    for r in range(12):
+        for s,t in TEMPLATE.items():
+            tp = np.roll(t,r)/np.linalg.norm(np.roll(t,r))
+            dot = np.dot(v,tp)
+            if dot>sc: sc, best = dot, f"{NOTES[r]}{s}"
+    return best
 
-# --- CONFIG ---
-NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-MAJOR_PROFILE = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88]
-MINOR_PROFILE = [6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17]
+file = st.file_uploader("Upload MP3/MP4:", type=["mp3","mp4","wav","m4a"])
+target = st.selectbox("Transpose to:", NOTES, index=7)
 
-def detect_key(chroma_mean):
-    best_key = "C Major"
-    best_score = -100
-    for i in range(12):
-        score = np.corrcoef(chroma_mean, np.roll(MAJOR_PROFILE, i))[0,1]
-        if score > best_score:
-            best_score = score
-            best_key = f"{NOTES[i]} Major"
-        score = np.corrcoef(chroma_mean, np.roll(MINOR_PROFILE, i))[0,1]
-        if score > best_score:
-            best_score = score
-            best_key = f"{NOTES[i]} Minor"
-    return best_key
+if file:
+    open("s.mp3","wb").write(file.getbuffer())
+    st.audio("s.mp3")
+    if st.button("ANALYZE", type="primary", use_container_width=True):
+        y,sr = librosa.load("s.mp3", duration=90)
+        chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+        key = NOTES[np.argmax(np.mean(chroma, axis=1))]
+        tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
+        bc = librosa.util.sync(chroma, beats, aggregate=np.median)
+        chords = [get_chord(bc[:,i]) for i in range(bc.shape[1])]
+        clean = []
+        for c in chords:
+            if not clean or clean[-1]!=c: clean.append(c)
+        steps = (NOTES.index(target)-NOTES.index(key))%12
+        trans = [NOTES[(NOTES.index(c[0] if len(c)==1 else c[:2] if c[1]=='#' else c[0])+steps)%12] + c[len(c[0] if len(c)==1 else c[:2] if c[1]=='#' else c[0]):] if c[0] in ''.join(NOTES) else c for c in clean]
+        # Fix transpose simple
+        def tr(ch, st):
+            r = ch[:2] if len(ch)>1 and ch[1]=='#' else ch[0]
+            suf = ch[len(r):]
+            return NOTES[(NOTES.index(r)+st)%12]+suf if r in NOTES else ch
+        trans = [tr(c,steps) for c in clean]
 
-def analyze_song(file_path):
-    # Load 90 seconds para mabilis pero accurate
-    y, sr = librosa.load(file_path, duration=90)
-    chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
-    chroma_mean = np.mean(chroma, axis=1)
+        st.success(f"Original Key: {key} | Target: {target} | BPM: {int(tempo)}")
+        st.code(" - ".join(trans[:100]))
 
-    key = detect_key(chroma_mean)
-
-    tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
-    beat_chroma = librosa.util.sync(chroma, beats, aggregate=np.median)
-
-    chords = []
-    for i in range(beat_chroma.shape[1]):
-        root = np.argmax(beat_chroma[:, i])
-        chords.append(NOTES[root])
-
-    return key, chords, int(tempo), chroma
-
-def transpose_chords(chords, original_root, target_root):
-    try:
-        steps = (NOTES.index(target_root) - NOTES.index(original_root)) % 12
-        transposed = [NOTES[(NOTES.index(c) + steps) % 12] for c in chords]
-        return transposed, steps
-    except:
-        return chords, 0
-
-def create_pdf(original_key, target_key, chords, tempo, filename):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", 'B', 16)
-    pdf.cell(0, 10, f"JM CHORD FINDER", ln=True, align='C')
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 10, f"File: {filename}", ln=True, align='C')
-    pdf.cell(0, 8, f"Original Key: {original_key} | Target Key: {target_key} | BPM: {tempo}", ln=True, align='C')
-    pdf.ln(10)
-
-    pdf.set_font("Arial", 'B', 11)
-    pdf.cell(0, 8, "CHORDS:", ln=True)
-    pdf.set_font("Arial", '', 10)
-
-    # Gawin 10 chords per line para maganda sa PDF
-    for i in range(0, len(chords), 10):
-        line = " - ".join(chords[i:i+10])
-        pdf.cell(0, 7, line, ln=True)
-
-    pdf.output("JM_Chords.pdf")
-    return "JM_Chords.pdf"
-
-# --- UI ---
-uploaded = st.file_uploader("📁 Upload MP3 / MP4 / WAV / M4A - Kahit anong kanta:", type=["mp3","mp4","wav","m4a","flac","ogg"])
-
-if uploaded is not None:
-    # Save file
-    ext = uploaded.name.split('.')[-1]
-    save_path = f"song.{ext}"
-    with open(save_path, "wb") as f:
-        f.write(uploaded.getbuffer())
-
-    st.success(f"Loaded: {uploaded.name} ({uploaded.size/1024/1024:.2f} MB)")
-    st.audio(save_path)
-
-    # Transpose Option
-    col1, col2 = st.columns(2)
-    with col1:
-        target_key = st.selectbox("🎹 Transpose to Key:", NOTES, index=NOTES.index('G'))
-    with col2:
-        st.write("")
-        st.write("")
-        analyze_btn = st.button("🔍 ANALYZE NOW", type="primary", use_container_width=True)
-
-    if analyze_btn:
-        with st.spinner("Analyzing Key + Chords... 5-10 seconds"):
-            try:
-                original_key, chords, tempo, _ = analyze_song(save_path)
-                orig_root = original_key.split()[0]
-
-                transposed_chords, steps = transpose_chords(chords, orig_root, target_key)
-
-                # SAVE TO SESSION FOR PDF
-                st.session_state['orig_key'] = original_key
-                st.session_state['target_key'] = f"{target_key} Major"
-                st.session_state['chords'] = transposed_chords
-                st.session_state['tempo'] = tempo
-                st.session_state['filename'] = uploaded.name
-                st.session_state['analyzed'] = True
-
-            except Exception as e:
-                st.error(f"Error analyzing: {e}")
-                st.info("Try mo ibang file, baka corrupted o walang audio")
-
-    # DISPLAY RESULT KUNG NA-ANALYZE NA
-    if 'analyzed' in st.session_state and st.session_state['analyzed']:
-        st.divider()
-        st.balloons()
-        st.subheader(f"✅ Original Key: {st.session_state['orig_key']}")
-        st.subheader(f"🎯 Transposed to: {st.session_state['target_key']} ( +{ (NOTES.index(target_key) - NOTES.index(st.session_state['orig_key'].split()[0])) % 12 } semitones )")
-        st.write(f"**BPM:** {st.session_state['tempo']}")
-
-        st.subheader("🎸 Chords:")
-        st.code(" | ".join(st.session_state['chords'][:100]), language="text")
-
-        # List view
-        with st.expander("View Chords List (Numbered)"):
-            for i, c in enumerate(st.session_state['chords'][:100]):
-                st.write(f"{i+1}. {c}")
-
-        # PDF EXPORT
-        pdf_path = create_pdf(
-            st.session_state['orig_key'],
-            st.session_state['target_key'],
-            st.session_state['chords'],
-            st.session_state['tempo'],
-            st.session_state['filename']
-        )
-        with open(pdf_path, "rb") as f:
-            st.download_button(
-                "📄 DOWNLOAD PDF (Chords + Key)",
-                f,
-                file_name=f"Chords_{st.session_state['filename']}.pdf",
-                use_container_width=True,
-                type="primary"
-            )
-
-else:
-    st.info("👆 Upload ka muna ng MP3 o MP4 sa taas. Kahit anong kanta, gagawan ng chords!")
-
-st.divider()
-st.caption("Pure MP3/MP4 Version | No YouTube = No Block | Works for all songs")
+        pdf=FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial",'B',12)
+        pdf.cell(0,10,f"Key {key} -> {target} | {file.name}", ln=True, align='C')
+        pdf.set_font("Arial",'',10)
+        for i in range(0,len(trans),10):
+            pdf.cell(0,6," - ".join(trans[i:i+10]), ln=True)
+        pdf.output("out.pdf")
+        with open("out.pdf","rb") as f:
+            st.download_button("DOWNLOAD PDF", f, file_name="chords.pdf", use_container_width=True)
