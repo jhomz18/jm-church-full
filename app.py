@@ -9,8 +9,8 @@ try:
 except:
     from fpdf2 import FPDF
 
-st.set_page_config(page_title="JM Church - Chord Finder", layout="centered")
-st.title("🎸 JM CHURCH - Chord Finder")
+st.set_page_config(page_title="JM - Chord Finder", layout="centered")
+st.title("🎸 JM - Chord Finder")
 
 # NOTES
 NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
