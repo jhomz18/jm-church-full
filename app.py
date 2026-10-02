@@ -1,175 +1,157 @@
 import streamlit as st
-import librosa, numpy as np, os, re, yt_dlp
+import librosa
+import numpy as np
+import os
 from fpdf import FPDF
-try:
-    from youtube_transcript_api import YouTubeTranscriptApi
-    HAS_YT_TRANS = True
-except: HAS_YT_TRANS=False
 
-# WHISPER FOR ALL MP3
-@st.cache_resource
-def load_whisper():
-    try:
-        import whisper
-        # tiny = mabilis, base = mas accurate pero mabigat
-        # sa Render free, tiny muna para di ma-OOM
-        return whisper.load_model("tiny")
-    except:
-        return None
+st.set_page_config(page_title="JM CHORD FINDER - MP3 ONLY", page_icon="🎸", layout="centered")
+st.title("🎸 JM CHORD FINDER")
+st.caption("MP3 / MP4 / WAV / M4A - Kahit anong kanta | Key + Chords + Transpose + PDF")
 
-st.set_page_config(page_title="JM CHORD FINDER PRO", page_icon="🎸")
-st.title("🎸 JM CHORD FINDER - PRO MAX")
-st.caption("ANY MP3 = Auto Lyrics + Chords + Key + PDF | YouTube Bypass")
-
-NOTES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
-MAJOR = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88]
-MINOR = [6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17]
+# --- CONFIG ---
+NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+MAJOR_PROFILE = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88]
+MINOR_PROFILE = [6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17]
 
 def detect_key(chroma_mean):
-    best, score_best = "C Major", -1
+    best_key = "C Major"
+    best_score = -100
     for i in range(12):
-        s = np.corrcoef(chroma_mean, np.roll(MAJOR,i))[0,1]
-        if s > score_best: score_best, best = s, f"{NOTES[i]} Major"
-        s = np.corrcoef(chroma_mean, np.roll(MINOR,i))[0,1]
-        if s > score_best: score_best, best = s, f"{NOTES[i]} Minor"
-    return best
+        score = np.corrcoef(chroma_mean, np.roll(MAJOR_PROFILE, i))[0,1]
+        if score > best_score:
+            best_score = score
+            best_key = f"{NOTES[i]} Major"
+        score = np.corrcoef(chroma_mean, np.roll(MINOR_PROFILE, i))[0,1]
+        if score > best_score:
+            best_score = score
+            best_key = f"{NOTES[i]} Minor"
+    return best_key
 
-def get_yt_id(url):
-    m = re.search(r"(?:v=|youtu\.be/)([^&?/]+)", url or "")
-    return m.group(1) if m else None
-
-def get_yt_lyrics(url):
-    if not HAS_YT_TRANS: return None
-    try:
-        vid = get_yt_id(url)
-        tr = YouTubeTranscriptApi.get_transcript(vid, languages=['en','tl','en-US'])
-        return " ".join([x['text'] for x in tr])
-    except: return None
-
-def transcribe_mp3_whisper(file_path):
-    model = load_whisper()
-    if model is None:
-        return None
-    try:
-        result = model.transcribe(file_path, language='en', fp16=False)
-        return result['text']
-    except Exception as e:
-        st.warning(f"Whisper error: {e}")
-        return None
-
-def download_yt(url):
-    for f in os.listdir('.'):
-        if f.startswith('temp_audio'):
-            try: os.remove(f)
-            except: pass
-    opts = {
-        'format':'bestaudio/best',
-        'outtmpl':'temp_audio.%(ext)s',
-        'quiet':True, 'noplaylist':True,
-        'extractor_args':{'youtube':{'player_client':['android','ios','web'],'skip':['hls','dash']}},
-        'http_headers':{'User-Agent':'Mozilla/5.0 (Linux; Android 12;)'},
-        'postprocessors':[{'key':'FFmpegExtractAudio','preferredcodec':'mp3','preferredquality':'192'}],
-    }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        ydl.download([url])
-    for f in os.listdir('.'):
-        if f.startswith('temp_audio') and f.endswith('.mp3'): return f
-    return None
-
-def analyze(file_path):
+def analyze_song(file_path):
+    # Load 90 seconds para mabilis pero accurate
     y, sr = librosa.load(file_path, duration=90)
     chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
     chroma_mean = np.mean(chroma, axis=1)
+
     key = detect_key(chroma_mean)
+
     tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
     beat_chroma = librosa.util.sync(chroma, beats, aggregate=np.median)
-    chords = [NOTES[np.argmax(beat_chroma[:,i])] for i in range(beat_chroma.shape[1])]
-    return key, chords, tempo
+
+    chords = []
+    for i in range(beat_chroma.shape[1]):
+        root = np.argmax(beat_chroma[:, i])
+        chords.append(NOTES[root])
+
+    return key, chords, int(tempo), chroma
+
+def transpose_chords(chords, original_root, target_root):
+    try:
+        steps = (NOTES.index(target_root) - NOTES.index(original_root)) % 12
+        transposed = [NOTES[(NOTES.index(c) + steps) % 12] for c in chords]
+        return transposed, steps
+    except:
+        return chords, 0
+
+def create_pdf(original_key, target_key, chords, tempo, filename):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 10, f"JM CHORD FINDER", ln=True, align='C')
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 10, f"File: {filename}", ln=True, align='C')
+    pdf.cell(0, 8, f"Original Key: {original_key} | Target Key: {target_key} | BPM: {tempo}", ln=True, align='C')
+    pdf.ln(10)
+
+    pdf.set_font("Arial", 'B', 11)
+    pdf.cell(0, 8, "CHORDS:", ln=True)
+    pdf.set_font("Arial", '', 10)
+
+    # Gawin 10 chords per line para maganda sa PDF
+    for i in range(0, len(chords), 10):
+        line = " - ".join(chords[i:i+10])
+        pdf.cell(0, 7, line, ln=True)
+
+    pdf.output("JM_Chords.pdf")
+    return "JM_Chords.pdf"
 
 # --- UI ---
-youtube_url = st.text_input("YouTube Link (optional):")
-mp3_file = st.file_uploader("MP3 backup - KAHIT ANONG KANTA:", type=["mp3","wav","m4a"])
-target_key = st.text_input("🎹 Target Key (Transpose to):", value="G")
+uploaded = st.file_uploader("📁 Upload MP3 / MP4 / WAV / M4A - Kahit anong kanta:", type=["mp3","mp4","wav","m4a","flac","ogg"])
 
-if st.button("🔍 ANALYZE ALL MP3", type="primary", use_container_width=True):
-    audio_path = None
-    lyrics_text = None
-    title = "JM Chords"
+if uploaded is not None:
+    # Save file
+    ext = uploaded.name.split('.')[-1]
+    save_path = f"song.{ext}"
+    with open(save_path, "wb") as f:
+        f.write(uploaded.getbuffer())
 
-    if mp3_file is not None:
-        with open("temp_upload.mp3","wb") as out:
-            out.write(mp3_file.getbuffer())
-        audio_path = "temp_upload.mp3"
-        title = mp3_file.name
-    elif youtube_url.strip()!="":
-        with st.spinner("Downloading YouTube with bypass..."):
-            audio_path = download_yt(youtube_url)
-            lyrics_text = get_yt_lyrics(youtube_url)
-            title = youtube_url
-    else:
-        st.warning("Upload MP3 or lagay YouTube link!")
-        st.stop()
+    st.success(f"Loaded: {uploaded.name} ({uploaded.size/1024/1024:.2f} MB)")
+    st.audio(save_path)
 
-    if audio_path and os.path.exists(audio_path):
-        st.audio(audio_path)
+    # Transpose Option
+    col1, col2 = st.columns(2)
+    with col1:
+        target_key = st.selectbox("🎹 Transpose to Key:", NOTES, index=NOTES.index('G'))
+    with col2:
+        st.write("")
+        st.write("")
+        analyze_btn = st.button("🔍 ANALYZE NOW", type="primary", use_container_width=True)
 
-        # KEY + CHORDS
-        with st.spinner("1/2 Detecting Key + Chords..."):
-            key, chords, tempo = analyze(audio_path)
+    if analyze_btn:
+        with st.spinner("Analyzing Key + Chords... 5-10 seconds"):
+            try:
+                original_key, chords, tempo, _ = analyze_song(save_path)
+                orig_root = original_key.split()[0]
 
-        # TRANSPOSE
-        try:
-            orig = key.split()[0]
-            steps = (NOTES.index(target_key.upper()) - NOTES.index(orig)) % 12
-            transposed = [NOTES[(NOTES.index(c)+steps)%12] for c in chords]
-        except:
-            transposed = chords
-            steps = 0
+                transposed_chords, steps = transpose_chords(chords, orig_root, target_key)
 
-        st.success(f"ORIGINAL: {key} | TARGET: {target_key} | BPM: {int(tempo)}")
-        st.code(" - ".join(transposed[:80]))
+                # SAVE TO SESSION FOR PDF
+                st.session_state['orig_key'] = original_key
+                st.session_state['target_key'] = f"{target_key} Major"
+                st.session_state['chords'] = transposed_chords
+                st.session_state['tempo'] = tempo
+                st.session_state['filename'] = uploaded.name
+                st.session_state['analyzed'] = True
 
-        # LYRICS - OPTION B LOGIC
-        with st.spinner("2/2 Transcribing Lyrics for ANY MP3 (Whisper AI - 20-40s)..."):
-            if lyrics_text is None and mp3_file is not None:
-                # ANY MP3 -> Whisper
-                lyrics_text = transcribe_mp3_whisper(audio_path)
-            elif lyrics_text is None:
-                lyrics_text = "No transcript found"
+            except Exception as e:
+                st.error(f"Error analyzing: {e}")
+                st.info("Try mo ibang file, baka corrupted o walang audio")
 
-        if lyrics_text:
-            st.subheader(f"🎤 Lyrics + Chords (Applicable sa LAHAT ng kanta):")
-            words = lyrics_text.split()
-            # Display na may chords sa taas
-            html_out = ""
-            for i, w in enumerate(words[:150]):
-                c = transposed[i % len(transposed)] if i < len(transposed) else target_key
-                if i % 8 == 0 and i!=0:
-                    html_out += "<br><br>"
-                html_out += f"<span style='color:red; font-weight:bold;'>[{c}]</span>{w} "
-            st.markdown(html_out, unsafe_allow_html=True)
+    # DISPLAY RESULT KUNG NA-ANALYZE NA
+    if 'analyzed' in st.session_state and st.session_state['analyzed']:
+        st.divider()
+        st.balloons()
+        st.subheader(f"✅ Original Key: {st.session_state['orig_key']}")
+        st.subheader(f"🎯 Transposed to: {st.session_state['target_key']} ( +{ (NOTES.index(target_key) - NOTES.index(st.session_state['orig_key'].split()[0])) % 12 } semitones )")
+        st.write(f"**BPM:** {st.session_state['tempo']}")
 
-            # PDF
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Arial",'B',14)
-            pdf.cell(0,10,f"Key {key} -> {target_key} | {title}", ln=True, align='C')
-            pdf.ln(5)
-            for i in range(0, min(len(words),150), 8):
-                ch_line = " ".join(transposed[i:i+8])
-                w_line = " ".join(words[i:i+8])
-                pdf.set_font("Arial",'B',9)
-                pdf.cell(0,6,ch_line, ln=True)
-                pdf.set_font("Arial",'',10)
-                pdf.cell(0,6,w_line, ln=True)
-                pdf.ln(2)
-            pdf.output("JM_Chords.pdf")
-            with open("JM_Chords.pdf","rb") as f:
-                st.download_button("📄 DOWNLOAD PDF (Lyrics+Chords)", f, file_name="JM_Chords_Lyrics.pdf", use_container_width=True)
-        else:
-            st.info("No lyrics na-detect, pero may chords pa rin.")
-    else:
-        st.error("Audio file not found!")
+        st.subheader("🎸 Chords:")
+        st.code(" | ".join(st.session_state['chords'][:100]), language="text")
 
-st.markdown("---")
-st.caption("Option B: ANY MP3 = Whisper AI Transcription + Auto Chords. Mas mabagal ng 30s pero lahat ng kanta may lyrics!")
+        # List view
+        with st.expander("View Chords List (Numbered)"):
+            for i, c in enumerate(st.session_state['chords'][:100]):
+                st.write(f"{i+1}. {c}")
+
+        # PDF EXPORT
+        pdf_path = create_pdf(
+            st.session_state['orig_key'],
+            st.session_state['target_key'],
+            st.session_state['chords'],
+            st.session_state['tempo'],
+            st.session_state['filename']
+        )
+        with open(pdf_path, "rb") as f:
+            st.download_button(
+                "📄 DOWNLOAD PDF (Chords + Key)",
+                f,
+                file_name=f"Chords_{st.session_state['filename']}.pdf",
+                use_container_width=True,
+                type="primary"
+            )
+
+else:
+    st.info("👆 Upload ka muna ng MP3 o MP4 sa taas. Kahit anong kanta, gagawan ng chords!")
+
+st.divider()
+st.caption("Pure MP3/MP4 Version | No YouTube = No Block | Works for all songs")
