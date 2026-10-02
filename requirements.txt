@@ -4,3 +4,4 @@ soundfile
 numpy
 fpdf
 audioread
+setuptools
