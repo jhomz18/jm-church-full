@@ -2,5 +2,5 @@ streamlit
 librosa==0.10.0
 soundfile
 numpy
-fpdf2
+fpdf
 audioread
